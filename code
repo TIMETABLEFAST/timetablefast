@@ -1,0 +1,1615 @@
+package timetable;
+
+import javax.swing.*;
+import java.awt.*;
+import java.io.*;
+import java.util.*;
+import java.util.List;
+import java.util.Map;
+
+public class TimetableManagement {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            new MainFrame().setVisible(true);
+        });
+    }
+}
+
+class MainFrame extends JFrame {
+    private JSON_FUNCTIONS jsonFunctions;
+    public MainFrame() {
+        setTitle("Timetable Management System");
+        setSize(800, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Welcome to Timetable Management System", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        mainPanel.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(3, 1, 10, 10));
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(50, 150, 50, 150));
+
+        JButton studentButton = new JButton("Student");
+        JButton teacherButton = new JButton("Teacher");
+        JButton adminButton = new JButton("Administrator");
+
+        studentButton.setFont(new Font("Arial", Font.PLAIN, 18));
+        teacherButton.setFont(new Font("Arial", Font.PLAIN, 18));
+        adminButton.setFont(new Font("Arial", Font.PLAIN, 18));
+
+        studentButton.addActionListener(e -> new StudentLoginFrame().setVisible(true));
+        teacherButton.addActionListener(e -> new TeacherLoginFrame().setVisible(true));
+        adminButton.addActionListener(e -> new AdminLoginFrame().setVisible(true));
+
+        buttonPanel.add(studentButton);
+        buttonPanel.add(teacherButton);
+        buttonPanel.add(adminButton);
+
+        mainPanel.add(buttonPanel, BorderLayout.CENTER);
+        add(mainPanel);
+
+        jsonFunctions = new JSON_FUNCTIONS();
+    }
+
+    public JSON_FUNCTIONS getJsonFunctions(){
+        return jsonFunctions;
+    }
+}
+
+ enum Day {
+    MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY;
+
+    public static Day fromString(String dayStr) {
+        if (dayStr == null || dayStr.trim().isEmpty()) {
+            return MONDAY; // Default, but consider throwing an exception instead
+        }
+
+        // Clean the input string - remove trailing colon if present
+        String cleanStr = dayStr.trim().replace(":", "");
+
+        try {
+            return Day.valueOf(cleanStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return MONDAY; // Default as in original
+        }
+    }
+
+    @Override
+    public String toString() {
+        return name().charAt(0) + name().substring(1).toLowerCase();
+    }
+}
+
+class Student {
+    private String name;
+    private String rollNo;
+    private String section;
+    private String department;
+    private String timetableFilename;
+    private Map<Day, List<String>> timetable;
+
+    private static final Map<String, String> DEPT_PREFIXES = Map.of(
+            "Software Engineering", "SE",
+            "Computer Science", "CS",
+            "Data Science", "DS",
+            "Cyber Security", "CY",
+            "Artificial Intelligence", "AI",
+            "Electrical Engineering", "EE",
+            "Financial Technology", "FT",
+            "Business Analytics", "BA"
+    );
+
+    public Student(String name, String rollNo, String section, String department) {
+        this.name = name;
+        this.rollNo = rollNo;
+        this.section = section.toUpperCase();
+        this.department = department;
+        this.timetableFilename = generateFilename(department, section);
+        this.timetable = new EnumMap<>(Day.class);
+    }
+    private String generateFilename(String department, String section) {
+        String deptPrefix = DEPT_PREFIXES.get(department);
+        return deptPrefix + "-" + section + ".txt";
+    }
+
+    public void loadTimetableFromFile() throws IOException {
+        timetable.clear();
+        InputStream inputStream = getClass().getResourceAsStream("/" + timetableFilename);
+
+        if (inputStream == null) {
+            // If not found in resources, try current directory
+            File file = new File(timetableFilename);
+            if (!file.exists()) {
+                throw new FileNotFoundException("Timetable file not found: " + timetableFilename +
+                        "\nSearched in: " + new File(".").getAbsolutePath());
+            }
+            inputStream = new FileInputStream(file);
+        }
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+            String line;
+            Day currentDay = Day.MONDAY;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty()) continue;
+                if (line.endsWith(":")) {
+                    currentDay = Day.fromString(line.substring(0, line.length() - 1));
+                } else {
+                    timetable.computeIfAbsent(currentDay, k -> new ArrayList<>()).add(line.trim());
+                }
+            }
+        }
+    }
+
+    public void displayTimetable(JTextArea textArea) {
+        try {
+            validateDepartmentAndSection();
+            loadTimetableFromFile();
+
+            textArea.setText("");
+            textArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
+
+            // Header
+            textArea.append(String.format("%-50s\n\n", "TIMETABLE FOR " + department.toUpperCase() + " - SECTION " + section));
+            textArea.append(String.format("%-30s: %s\n", "Student Name", name));
+            textArea.append(String.format("%-30s: %s\n\n", "Roll Number", rollNo));
+
+            // Timetable content
+            for (Day day : Day.values()) {
+                List<String> slots = timetable.get(day);
+                if (slots == null || slots.isEmpty()) continue;
+
+                textArea.append(String.format("%s:\n", day.toString().toUpperCase()));
+
+                for (String slot : slots) {
+                    String[] parts = slot.split(" - ");
+                    if (parts.length >= 2) {
+                        String course = parts[0];
+                        String details = parts[1];
+                        textArea.append(String.format("  %-15s - %-30s\n", course, details));
+                    } else {
+                        textArea.append(String.format("  %-45s\n", slot));
+                    }
+                }
+                textArea.append("\n");
+            }
+        } catch (FileNotFoundException e) {
+            textArea.append("Error: Timetable not available for " + department + " " + section + "\n");
+            textArea.append("Expected file: " + timetableFilename + "\n");
+            textArea.append("Searched in: " + new File(".").getAbsolutePath() + "\n");
+        } catch (IOException e) {
+            textArea.append("Error reading timetable: " + e.getMessage() + "\n");
+        } catch (IllegalArgumentException e) {
+            textArea.append("Error: " + e.getMessage() + "\n");
+        }
+    }
+
+    public void compareTimetable(Student other, JTextArea textArea) {
+        try {
+            loadTimetableFromFile();
+            other.loadTimetableFromFile();
+
+            textArea.setText("");
+            textArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
+
+            textArea.append(String.format("%-50s\n\n", "TIMETABLE COMPARISON"));
+            textArea.append(String.format("%-30s: %s (%s)\n", "Student 1", name, section));
+            textArea.append(String.format("%-30s: %s (%s)\n\n", "Student 2", other.name, other.section));
+
+            for (Day day : Day.values()) {
+                List<String> mySlots = timetable.get(day);
+                List<String> otherSlots = other.timetable.get(day);
+
+                if (mySlots == null || otherSlots == null) continue;
+
+                textArea.append(String.format("%s:\n", day.toString().toUpperCase()));
+
+                List<String> commonFreeSlots = new ArrayList<>();
+                for (int i = 0; i < Math.min(mySlots.size(), otherSlots.size()); i++) {
+                    String mySlot = mySlots.get(i);
+                    String otherSlot = otherSlots.get(i);
+
+                    if (mySlot.startsWith("Free") && otherSlot.startsWith("Free")) {
+                        String[] parts = mySlot.split(" - ");
+                        if (parts.length >= 2) {
+                            commonFreeSlots.add(parts[1].trim());
+                        }
+                    }
+                }
+
+                if (commonFreeSlots.isEmpty()) {
+                    textArea.append("  No common free slots\n");
+                } else {
+                    textArea.append("  Common free slots:\n");
+                    for (String slot : commonFreeSlots) {
+                        textArea.append(String.format("    %-15s\n", slot));
+                    }
+                }
+                textArea.append("\n");
+            }
+        } catch (IOException e) {
+            textArea.append("Error comparing timetables: " + e.getMessage() + "\n");
+        }
+    }
+
+    private void validateDepartmentAndSection() throws IllegalArgumentException {
+        if (!DEPT_PREFIXES.containsKey(department)) {
+            throw new IllegalArgumentException("Invalid department: " + department);
+        }
+
+        switch(department) {
+            case "Software Engineering":
+                if (!Arrays.asList("A", "B").contains(section)) {
+                    throw new IllegalArgumentException("Invalid section for Software Engineering: " + section);
+                }
+                break;
+            case "Computer Science":
+                if (!Arrays.asList("A", "B", "C", "D", "E", "F", "G", "H", "J", "K").contains(section)) {
+                    throw new IllegalArgumentException("Invalid section for Computer Science: " + section);
+                }
+                break;
+            case "Data Science":
+                if (!Arrays.asList("A", "B").contains(section)) {
+                    throw new IllegalArgumentException("Invalid section for Data Science: " + section);
+                }
+                break;
+            case "Cyber Security":
+                if (!section.equals("A")) {
+                    throw new IllegalArgumentException("Cyber Security only has section A");
+                }
+                break;
+            case "Artificial Intelligence":
+                if (!section.equals("A")) {
+                    throw new IllegalArgumentException("AI only has section A");
+                }
+                break;
+            case "Electrical Engineering":
+                if (!Arrays.asList("A", "B", "C").contains(section)) {
+                    throw new IllegalArgumentException("Invalid section for Electrical Engineering: " + section);
+                }
+                break;
+            case "Financial Technology":
+                if (!Arrays.asList("A", "B", "C").contains(section)) {
+                    throw new IllegalArgumentException("Invalid section for FinTech: " + section);
+                }
+                break;
+            case "Business Analytics":
+                if (!section.equals("A")) {
+                    throw new IllegalArgumentException("Business Analytics only has section A");
+                }
+                break;
+        }
+    }
+
+    public String getName() { return name; }
+    public String getRollNo() { return rollNo; }
+    public String getSection() { return section; }
+    public String getDepartment() { return department; }
+    public String getTimetableFilename() { return timetableFilename; }
+}
+
+
+class Teacher {
+    private String name;
+    private String department;
+    private Map<Day, List<String>> timetable;
+    private List<String> subjects;
+
+    public Teacher(String name, String department) {
+        this.name = name;
+        this.department = department;
+        this.timetable = new EnumMap<>(Day.class);
+        this.subjects = new ArrayList<>();
+    }
+
+    public void loadTimetableFromFile() throws IOException {
+        timetable.clear();
+        String filename = "C:\\Users\\HP\\IdeaProjects\\fast timetable\\src\\timetable\\" +
+                name.toLowerCase().replace(" ", "_") + "_timetable.txt";
+        File file = new File(filename);
+
+        if (!file.exists()) {
+            throw new FileNotFoundException("Timetable file not found: " + file.getAbsolutePath());
+        }
+
+        boolean inConsolidatedSection = false;
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            Day currentDay = null;
+
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+
+                // Fixed: Match both with/without space before colon
+                if (line.startsWith("Consolidated Timetable")) {
+                    inConsolidatedSection = true;
+                    continue;
+                }
+
+                if (inConsolidatedSection) {
+                    if (line.endsWith(":")) {
+                        String dayStr = line.replace(":", "").trim();
+                        currentDay = Day.fromString(dayStr);
+                    } else if (currentDay != null && !line.isEmpty()) {
+                        timetable.computeIfAbsent(currentDay, k -> new ArrayList<>()).add(line.trim());
+                    }
+                }
+            }
+        }
+    }
+
+    public void displayTimetable(JTextArea textArea) {
+        try {
+            loadTimetableFromFile();
+            textArea.setText("");
+            textArea.append("TIMETABLE FOR " + name.toUpperCase() + "\n\n");
+
+            if (department != null && !department.isEmpty()) {
+                textArea.append("Department: " + department + "\n\n");
+            }
+
+            for (Day day : Day.values()) {
+                List<String> slots = timetable.get(day);
+                if (slots == null || slots.isEmpty()) continue;
+
+                textArea.append(day.toString().toUpperCase() + ":\n");
+                for (String slot : slots) {
+                    textArea.append("  " + slot + "\n");
+                }
+                textArea.append("\n");
+            }
+
+            if (timetable.isEmpty()) {
+                textArea.append("No timetable entries found.\n");
+            }
+        } catch (IOException e) {
+            textArea.append("Error: " + e.getMessage() + "\n");
+        }
+    }
+
+    public void compareTimetable(Teacher other, JTextArea textArea) {
+        try {
+            loadTimetableFromFile();
+            other.loadTimetableFromFile();
+
+            textArea.setText("");
+            textArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
+
+            textArea.append(String.format("%-50s\n\n", "TIMETABLE COMPARISON"));
+            textArea.append(String.format("%-30s: %s (%s)\n", "Teacher 1", name, department));
+            textArea.append(String.format("%-30s: %s (%s)\n\n", "Teacher 2", other.name, other.department));
+
+            for (Day day : Day.values()) {
+                List<String> mySlots = timetable.get(day);
+                List<String> otherSlots = other.timetable.get(day);
+
+                if (mySlots == null || otherSlots == null) continue;
+
+                textArea.append(String.format("%s:\n", day.toString().toUpperCase()));
+
+                List<String> commonFreeSlots = new ArrayList<>();
+                for (int i = 0; i < Math.min(mySlots.size(), otherSlots.size()); i++) {
+                    String mySlot = mySlots.get(i);
+                    String otherSlot = otherSlots.get(i);
+
+                    if (mySlot.startsWith("Free") && otherSlot.startsWith("Free")) {
+                        String[] parts = mySlot.split(" - ");
+                        if (parts.length >= 2) {
+                            commonFreeSlots.add(parts[1].trim());
+                        }
+                    }
+                }
+
+                if (commonFreeSlots.isEmpty()) {
+                    textArea.append("  No common free slots\n");
+                } else {
+                    textArea.append("  Common free slots:\n");
+                    for (String slot : commonFreeSlots) {
+                        textArea.append(String.format("    %-15s\n", slot));
+                    }
+                }
+                textArea.append("\n");
+            }
+        } catch (IOException e) {
+            textArea.append("Error comparing timetables: " + e.getMessage() + "\n");
+        }
+    }
+
+    public void bookSlot(Student student, Day day, String newSlot, int slotIndex, JTextArea textArea) {
+        try {
+            loadTimetableFromFile();
+            student.loadTimetableFromFile();
+
+            List<String> slots = timetable.get(day);
+            if (slots != null && slotIndex >= 0 && slotIndex < slots.size()) {
+                slots.set(slotIndex, newSlot);
+                saveTimetableToFile();
+                textArea.append("Slot booked successfully:\n" + newSlot + "\n");
+            } else {
+                textArea.append("Invalid slot selection\n");
+            }
+        } catch (IOException e) {
+            textArea.append("Error booking slot: " + e.getMessage() + "\n");
+        }
+    }
+
+
+        private void saveTimetableToFile() throws IOException {
+            String filename = name.toLowerCase().replace(" ", "_") + "_timetable.txt";
+            try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
+            for (Map.Entry<Day, List<String>> entry : timetable.entrySet()) {
+                writer.println(entry.getKey() + ":");
+                for (String slot : entry.getValue()) {
+                    writer.println("\t" + slot);
+                }
+            }
+        }
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public List<String> getSubjects() {
+        return new ArrayList<>(subjects);
+    }
+
+    public void setSubjects(List<String> list) {
+    }
+}
+
+class Timetable {
+    private String batch;
+    private String department;
+    private String section;
+    private String teacherName;
+    private String subject;
+    private Map<String, String[]> schedule; // Day -> periods
+
+    public Timetable() {
+        schedule = new HashMap<>();
+    }
+
+    // Getters and setters
+    public String getBatch() { return batch; }
+    public void setBatch(String grade) { this.batch = batch; }
+    public String getDepartment() {return department;}
+    public void setDepartment(String department) {this.department = department;    }
+    public String getSection() { return section; }
+    public void setSection(String section) { this.section = section; }
+    public String getTeacherName() { return teacherName; }
+    public void setTeacherName(String teacherName) { this.teacherName = teacherName; }
+    public String getSubject() { return subject; }
+    public void setSubject(String subject) { this.subject = subject; }
+    public Map<String, String[]> getSchedule() { return schedule; }
+
+    public void addDaySchedule(String day, String[] periods) {
+        schedule.put(day, periods);
+    }
+}
+
+
+
+class StudentLoginFrame extends JFrame {
+    public static final Map<String, String> DEPT_PREFIXES = Map.of(
+            "Software Engineering", "SE",
+            "Computer Science", "CS",
+            "Data Science", "DS",
+            "Cyber Security", "CY",
+            "Artificial Intelligence", "AI",
+            "Electrical Engineering", "EE",
+            "Financial Technology", "FT",
+            "Business Analytics", "BA"
+    );
+
+    public StudentLoginFrame() {
+        setTitle("Student Login");
+        setSize(600, 450);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Student Login", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 22));
+        mainPanel.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel formPanel = new JPanel(new GridLayout(5, 2, 10, 15));
+
+        JTextField nameField = new JTextField();
+        JTextField rollNoField = new JTextField();
+        JComboBox<String> deptCombo = new JComboBox<>();
+        JComboBox<String> sectionCombo = new JComboBox<>();
+
+        String[] departments = DEPT_PREFIXES.keySet().toArray(new String[0]);
+        deptCombo.setModel(new DefaultComboBoxModel<>(departments));
+
+        deptCombo.addActionListener(e -> updateSectionsCombo(deptCombo, sectionCombo));
+
+        formPanel.add(new JLabel("Full Name:"));
+        formPanel.add(nameField);
+        formPanel.add(new JLabel("Roll Number (24k-1234):"));
+        formPanel.add(rollNoField);
+        formPanel.add(new JLabel("Department:"));
+        formPanel.add(deptCombo);
+        formPanel.add(new JLabel("Section:"));
+        formPanel.add(sectionCombo);
+
+        updateSectionsCombo(deptCombo, sectionCombo);
+
+        mainPanel.add(formPanel, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+
+        JButton loginButton = new JButton("Login");
+        loginButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        loginButton.setPreferredSize(new Dimension(120, 40));
+
+        JButton clearButton = new JButton("Clear");
+        clearButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        clearButton.setPreferredSize(new Dimension(120, 40));
+
+        buttonPanel.add(loginButton);
+        buttonPanel.add(clearButton);
+        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        loginButton.addActionListener(e -> {
+            String name = nameField.getText().trim();
+            String rollNo = rollNoField.getText().trim();
+            String department = (String) deptCombo.getSelectedItem();
+            String section = (String) sectionCombo.getSelectedItem();
+
+            if (name.isEmpty() || rollNo.isEmpty()) {
+                JOptionPane.showMessageDialog(this,
+                        "Name and Roll Number are required fields",
+                        "Input Error",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            if (!rollNo.matches("24[kK]-\\d{4}")) {
+                JOptionPane.showMessageDialog(this,
+                        "Roll number must be in format 24k-1234 (k can be upper or lower case)",
+                        "Invalid Roll Number",
+                        JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            String deptPrefix = DEPT_PREFIXES.get(department);
+            String filename = deptPrefix + "-" + section + ".txt";
+
+            if (!checkTimetableFileExists(filename)) {
+                JOptionPane.showMessageDialog(this,
+                        "Timetable not found for " + department + " " + section,
+                        "File Not Found",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            Student student = new Student(name, rollNo, section, department);
+            new StudentDashboardFrame(student).setVisible(true);
+            dispose();
+        });
+
+        clearButton.addActionListener(e -> {
+            nameField.setText("");
+            rollNoField.setText("");
+            deptCombo.setSelectedIndex(0);
+            updateSectionsCombo(deptCombo, sectionCombo);
+        });
+
+        rollNoField.addActionListener(e -> loginButton.doClick());
+
+        add(mainPanel);
+    }
+
+    private void updateSectionsCombo(JComboBox<String> deptCombo, JComboBox<String> sectionCombo) {
+        String department = (String) deptCombo.getSelectedItem();
+        String[] sections = {};
+
+        switch(department) {
+            case "Software Engineering": sections = new String[]{"A", "B"}; break;
+            case "Computer Science": sections = new String[]{"A", "B", "C", "D", "E", "F", "G", "H", "J", "K"}; break;
+            case "Data Science": sections = new String[]{"A", "B"}; break;
+            case "Cyber Security": sections = new String[]{"A"}; break;
+            case "Artificial Intelligence": sections = new String[]{"A"}; break;
+            case "Electrical Engineering": sections = new String[]{"A", "B", "C"}; break;
+            case "Financial Technology": sections = new String[]{"A", "B", "C"}; break;
+            case "Business Analytics": sections = new String[]{"A"}; break;
+        }
+
+        sectionCombo.setModel(new DefaultComboBoxModel<>(sections));
+    }
+
+    private boolean checkTimetableFileExists(String filename) {
+        // Check in resources first
+        if (Student.class.getResource("/" + filename) != null) {
+            return true;
+        }
+        // Then check in current directory
+        return new File(filename).exists();
+    }
+}
+
+
+class TeacherLoginFrame extends JFrame {
+    private JTextField nameField;
+
+    public TeacherLoginFrame() {
+        setTitle("Teacher Login");
+        setSize(400, 250);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Teacher Login", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel formPanel = new JPanel(new GridLayout(2, 2, 10, 10));
+
+        formPanel.add(new JLabel("Enter Full Name:"));
+        nameField = new JTextField();
+        formPanel.add(nameField);
+
+        panel.add(formPanel, BorderLayout.CENTER);
+
+        JButton loginButton = new JButton("Login");
+        loginButton.addActionListener(e -> {
+            String name = nameField.getText().trim();
+            if (!name.isEmpty()) {
+                Teacher teacher = new Teacher(name, "");
+                new TeacherDashboardFrame(teacher).setVisible(true);
+                dispose();
+            } else {
+                JOptionPane.showMessageDialog(this, "Please enter the teacher's name.");
+            }
+        });
+
+        panel.add(loginButton, BorderLayout.SOUTH);
+        add(panel);
+    }
+}
+
+
+
+
+class StudentDashboardFrame extends JFrame {
+    private Student student;
+
+    public StudentDashboardFrame(Student student) {
+        this.student = student;
+        setTitle("Student Dashboard - " + student.getName());
+        setSize(800, 600);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel(student.getName() + " - " + student.getSection() +
+                " (" + student.getDepartment() + ")", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        JTextArea textArea = new JTextArea();
+        textArea.setEditable(false);
+        textArea.setFont(new Font("Monospaced", Font.PLAIN, 14));
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 10, 10));
+
+        JButton viewButton = new JButton("View Timetable");
+        viewButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        viewButton.addActionListener(e -> {
+            textArea.setText("");
+            student.displayTimetable(textArea);
+        });
+
+        JButton compareButton = new JButton("Compare Timetable");
+        compareButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        compareButton.addActionListener(e -> {
+            String section = JOptionPane.showInputDialog(this,
+                    "Enter section to compare with (A, B, etc.):",
+                    "Compare Timetable",
+                    JOptionPane.QUESTION_MESSAGE);
+
+            if (section != null && !section.isEmpty()) {
+                textArea.setText("");
+                String deptPrefix = StudentLoginFrame.DEPT_PREFIXES.get(student.getDepartment());
+                String filename = deptPrefix + "-" + section + ".txt";
+                Student other = new Student("", "", section, student.getDepartment());
+                student.compareTimetable(other, textArea);
+            }
+        });
+
+        buttonPanel.add(viewButton);
+        buttonPanel.add(compareButton);
+
+        panel.add(buttonPanel, BorderLayout.SOUTH);
+        add(panel);
+
+        // Automatically load timetable on startup
+        student.displayTimetable(textArea);
+    }
+}
+
+class TeacherDashboardFrame extends JFrame {
+    private Teacher teacher;
+
+    public TeacherDashboardFrame(Teacher teacher) {
+        this.teacher = teacher;
+        setTitle("Teacher Dashboard - " + teacher.getName());
+        setSize(900, 700);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Teacher Dashboard - " + teacher.getName(), JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        JTextArea textArea = new JTextArea();
+        textArea.setEditable(false);
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 10, 10));
+
+        JButton viewButton = new JButton("View Timetable");
+        viewButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        viewButton.addActionListener(e -> {
+            textArea.setText("");
+            teacher.displayTimetable(textArea);
+        });
+
+        JButton compareButton = new JButton("Compare Timetable");
+        compareButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        compareButton.addActionListener(e -> {
+            String name = JOptionPane.showInputDialog(this,
+                    "Enter teacher name to compare with:",
+                    "Compare Timetable",
+                    JOptionPane.QUESTION_MESSAGE);
+
+            if (name != null && !name.isEmpty()) {
+                textArea.setText("");
+                Teacher other = new Teacher(name, "");
+                teacher.compareTimetable(other, textArea);
+            }
+        });
+
+        JButton bookButton = new JButton("Book Slot");
+        bookButton.setFont(new Font("Arial", Font.PLAIN, 16));
+        bookButton.addActionListener(e -> showBookSlotDialog(textArea));
+
+        buttonPanel.add(viewButton);
+        buttonPanel.add(compareButton);
+        buttonPanel.add(bookButton);
+
+        panel.add(buttonPanel, BorderLayout.SOUTH);
+        add(panel);
+
+        // Automatically load timetable on startup
+        teacher.displayTimetable(textArea);
+    }
+
+    private void showBookSlotDialog(JTextArea textArea) {
+        JDialog dialog = new JDialog(this, "Book Slot", true);
+        dialog.setSize(500, 400);
+        dialog.setLocationRelativeTo(this);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JPanel formPanel = new JPanel(new GridLayout(5, 2, 10, 10));
+
+        JComboBox<Day> dayCombo = new JComboBox<>(Day.values());
+        JTextField sectionField = new JTextField();
+        JTextField slotField = new JTextField();
+        JTextField detailsField = new JTextField();
+
+        formPanel.add(new JLabel("Day:"));
+        formPanel.add(dayCombo);
+        formPanel.add(new JLabel("Section:"));
+        formPanel.add(sectionField);
+        formPanel.add(new JLabel("Slot Index:"));
+        formPanel.add(slotField);
+        formPanel.add(new JLabel("Details:"));
+        formPanel.add(detailsField);
+
+        panel.add(formPanel, BorderLayout.CENTER);
+
+        JButton bookButton = new JButton("Book");
+        bookButton.addActionListener(e -> {
+            try {
+                Day day = (Day) dayCombo.getSelectedItem();
+                String section = sectionField.getText();
+                int slotIndex = Integer.parseInt(slotField.getText());
+                String details = detailsField.getText();
+
+                Student student = new Student("", "", section, "");
+                teacher.bookSlot(student, day, details, slotIndex - 1, textArea);
+                dialog.dispose();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialog, "Invalid slot index", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        panel.add(bookButton, BorderLayout.SOUTH);
+        dialog.add(panel);
+        dialog.setVisible(true);
+    }
+}
+
+class  Administrative {
+    private static final String ADMIN_PASSWORD = "admin123"; // Default password
+
+    public boolean authenticate(String password) {
+        return ADMIN_PASSWORD.equals(password);
+    }
+    public void createStudentTimetable(Student student, Map<Day, List<String>> timetableData) throws IOException {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(student.getSection() + "_timetable.txt"))) {
+            for (Map.Entry<Day, List<String>> entry : timetableData.entrySet()) {
+                writer.println(entry.getKey() + ":");
+                for (String slot : entry.getValue()) {
+                    writer.println("\t" + slot);
+                }
+            }
+        }
+    }
+
+    public void createTeacherTimetable(Teacher teacher, Map<Day, List<String>> timetableData) throws IOException {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(teacher.getName() + "_timetable.txt"))) {
+            for (Map.Entry<Day, List<String>> entry : timetableData.entrySet()) {
+                writer.println(entry.getKey() + ":");
+                for (String slot : entry.getValue()) {
+                    writer.println("\t" + slot);
+                }
+            }
+        }
+    }
+
+
+
+    public boolean saveTimetable(Timetable timetable, String filename) {
+        try {
+            // Ensure directory src/timetables/ exists
+            File dir = new File("src/timetable/");
+            if (!dir.exists()) dir.mkdirs();
+
+            // Save to 'src/timetables/' folder
+            File file = new File(dir, filename);
+            try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
+                if (timetable.getTeacherName() != null) {
+                    // Teacher timetable
+                    writer.println("Teacher: " + timetable.getTeacherName());
+                    writer.println("Subject: " + timetable.getSubject());
+                    writer.println("Schedule:");
+                } else {
+                    // Student timetable
+                    writer.println("Batch: " + timetable.getBatch());
+                    writer.println("Department: " + timetable.getDepartment());
+                    writer.println("Section: " + timetable.getSection());
+                    writer.println("Class Schedule:");
+                }
+
+                for (Map.Entry<String, String[]> entry : timetable.getSchedule().entrySet()) {
+                    writer.println(entry.getKey() + ": " + String.join(", ", entry.getValue()));
+                }
+
+                return true;
+            } catch (IOException e) {
+                e.printStackTrace();
+                return false;
+            }
+        } finally {
+            // no special cleanup needed here
+        }
+    }
+
+}
+
+class AdminLoginFrame extends JFrame {
+    public AdminLoginFrame() {
+        setTitle("Administrator Login");
+        setSize(500, 300);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Administrator Login", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel formPanel = new JPanel(new GridLayout(1, 2, 10, 10));
+        JPasswordField passwordField = new JPasswordField();
+
+        formPanel.add(new JLabel("Password:"));
+        formPanel.add(passwordField);
+
+        panel.add(formPanel, BorderLayout.CENTER);
+
+        JButton loginButton = new JButton("Login");
+        loginButton.addActionListener(e -> {
+            String password = new String(passwordField.getPassword());
+            Administrative admin = new Administrative();
+            if (admin.authenticate(password)) {
+                new AdminDashboardFrame(admin).setVisible(true);
+                dispose();
+            } else {
+                JOptionPane.showMessageDialog(this, "Invalid password", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        panel.add(loginButton, BorderLayout.SOUTH);
+        add(panel);
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            AdminLoginFrame loginFrame = new AdminLoginFrame();
+            loginFrame.setVisible(true);
+        });
+    }
+}
+
+class AdminDashboardFrame extends JFrame {
+    private Administrative admin;
+
+    public AdminDashboardFrame(Administrative admin) {
+        this.admin = admin;
+        setTitle("Administrator Dashboard");
+        setSize(800, 600);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel titleLabel = new JLabel("Administrator Dashboard", JLabel.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(4, 1, 10, 10));
+
+        JButton createStudentButton = new JButton("Create Student Timetable");
+        createStudentButton.addActionListener(e -> showCreateStudentTimetableDialog());
+
+        JButton createTeacherButton = new JButton("Create Teacher Timetable");
+        createTeacherButton.addActionListener(e -> showCreateTeacherTimetableDialog());
+
+        JButton viewStudentButton = new JButton("View Student Timetable");
+        viewStudentButton.addActionListener(e -> showViewStudentTimetableDialog());
+
+        JButton viewTeacherButton = new JButton("View Teacher Timetable");
+        viewTeacherButton.addActionListener(e -> showViewTeacherTimetableDialog());
+
+        buttonPanel.add(createStudentButton);
+        buttonPanel.add(createTeacherButton);
+        buttonPanel.add(viewStudentButton);
+        buttonPanel.add(viewTeacherButton);
+
+        panel.add(buttonPanel, BorderLayout.CENTER);
+        add(panel);
+    }
+
+    private void showCreateStudentTimetableDialog() {
+        JDialog dialog = new JDialog(this, "Create Student Timetable", true);
+        dialog.setSize(900, 700);
+        dialog.setLocationRelativeTo(this);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JSON_FUNCTIONS json = new JSON_FUNCTIONS("C:\\Users\\HP\\OneDrive\\Desktop\\baseclasstimetable.txt");
+
+        JPanel formPanel = new JPanel(new GridLayout(4, 2, 10, 15));
+
+        JComboBox<String> batchCombo = new JComboBox<>();
+        for (String batch : json.getBatches()) {
+            batchCombo.addItem(batch);
+        }
+
+        JComboBox<String> deptCombo = new JComboBox<>();
+        JComboBox<String> sectionCombo = new JComboBox<>();
+
+        batchCombo.addActionListener(e -> {
+            String selectedBatch = (String) batchCombo.getSelectedItem();
+            deptCombo.removeAllItems();
+            if (selectedBatch != null) {
+                for (String dept : json.getDepartments(selectedBatch)) {
+                    deptCombo.addItem(dept);
+                }
+            }
+        });
+
+        deptCombo.addActionListener(e -> {
+            String selectedBatch = (String) batchCombo.getSelectedItem();
+            String selectedDept = (String) deptCombo.getSelectedItem();
+            if (selectedBatch != null && selectedDept != null) {
+                sectionCombo.removeAllItems();
+                for (String section : json.getSections(selectedBatch, selectedDept)) {
+                    sectionCombo.addItem(section);
+                }
+            }
+        });
+
+        if (batchCombo.getItemCount() > 0) {
+            batchCombo.setSelectedIndex(0);
+        }
+
+        // Time slots
+        String[] timeSlots = {"8-9AM", "9-10AM", "10-11AM", "11-12PM", "12-1PM", "1-2PM", "2-3PM", "3-4PM"};
+
+        // Schedule panel
+        JPanel schedulePanel = new JPanel(new GridLayout(5, 1, 10, 10));
+        String[] days = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday"};
+
+        JComboBox<String>[][] courseCombos = new JComboBox[5][4];
+        JComboBox<String>[][] timeCombos = new JComboBox[5][4];
+
+        for (int i = 0; i < days.length; i++) {
+            JPanel dayPanel = new JPanel(new GridLayout(1, 9, 5, 5));
+            dayPanel.add(new JLabel(days[i]));
+
+            for (int j = 0; j < 4; j++) {
+                courseCombos[i][j] = new JComboBox<>();
+                timeCombos[i][j] = new JComboBox<>(timeSlots);
+
+                int dayIndex = i;
+                int courseIndex = j;
+
+                // Simple event to remove selected time from other dropdowns
+                timeCombos[i][j].addActionListener(e -> {
+                    updateSimpleTimes(dayIndex, timeCombos, timeSlots);
+                });
+
+                dayPanel.add(courseCombos[i][j]);
+                dayPanel.add(timeCombos[i][j]);
+            }
+
+            schedulePanel.add(dayPanel);
+        }
+
+        // Populate course dropdowns when dept changes
+        batchCombo.addActionListener(e -> populateCourses(batchCombo, deptCombo, courseCombos, json));
+        deptCombo.addActionListener(e -> populateCourses(batchCombo, deptCombo, courseCombos, json));
+
+        formPanel.add(new JLabel("Batch:"));
+        formPanel.add(batchCombo);
+        formPanel.add(new JLabel("Department:"));
+        formPanel.add(deptCombo);
+        formPanel.add(new JLabel("Section:"));
+        formPanel.add(sectionCombo);
+
+        JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
+        mainPanel.add(formPanel, BorderLayout.NORTH);
+        mainPanel.add(schedulePanel, BorderLayout.CENTER);
+
+        panel.add(mainPanel, BorderLayout.CENTER);
+
+        JButton createButton = new JButton("Create Timetable");
+        createButton.addActionListener(e -> {
+            String batch = (String) batchCombo.getSelectedItem();
+            String department = (String) deptCombo.getSelectedItem();
+            String section = (String) sectionCombo.getSelectedItem();
+
+            if (batch == null || department == null || section == null) {
+                JOptionPane.showMessageDialog(dialog, "Please select all required fields",
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            Timetable timetable = new Timetable();
+            timetable.setBatch(batch);
+            timetable.setDepartment(department);
+            timetable.setSection(section);
+
+            for (int i = 0; i < days.length; i++) {
+                List<String> periods = new ArrayList<>();
+                for (int j = 0; j < 4; j++) {
+                    String course = (String) courseCombos[i][j].getSelectedItem();
+                    String time = (String) timeCombos[i][j].getSelectedItem();
+                    if (course != null && time != null) {
+                        periods.add(course + " (" + time + ")");
+                    }
+                }
+                timetable.addDaySchedule(days[i], periods.toArray(new String[0]));
+            }
+
+            String filename = String.format("%s_%s_%s.txt", batch, department, section);
+
+            if (admin.saveTimetable(timetable, filename)) {
+                JOptionPane.showMessageDialog(dialog,
+                        "Timetable created successfully!\nSaved as: " + filename,
+                        "Success", JOptionPane.INFORMATION_MESSAGE);
+                dialog.dispose();
+            } else {
+                JOptionPane.showMessageDialog(dialog,
+                        "Failed to create timetable",
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        panel.add(createButton, BorderLayout.SOUTH);
+        dialog.add(panel);
+        dialog.setVisible(true);
+    }
+
+    // Very basic method to update timeslots
+    private void updateSimpleTimes(int dayIndex, JComboBox<String>[][] timeCombos, String[] allSlots) {
+        List<String> selected = new ArrayList<>();
+        for (int j = 0; j < 4; j++) {
+            String selectedTime = (String) timeCombos[dayIndex][j].getSelectedItem();
+            if (selectedTime != null && !selectedTime.isEmpty()) {
+                selected.add(selectedTime);
+            }
+        }
+
+        for (int j = 0; j < 4; j++) {
+            String currentSelected = (String) timeCombos[dayIndex][j].getSelectedItem();
+            timeCombos[dayIndex][j].removeAllItems();
+
+            for (String slot : allSlots) {
+                if (!selected.contains(slot) || slot.equals(currentSelected)) {
+                    timeCombos[dayIndex][j].addItem(slot);
+                }
+            }
+            timeCombos[dayIndex][j].setSelectedItem(currentSelected);
+        }
+    }
+
+    private void populateCourses(JComboBox<String> batchCombo, JComboBox<String> deptCombo, JComboBox<String>[][] courseCombos, JSON_FUNCTIONS json) {
+        String selectedBatch = (String) batchCombo.getSelectedItem();
+        String selectedDept = (String) deptCombo.getSelectedItem();
+
+        if (selectedBatch != null && selectedDept != null) {
+            String[] courses = json.getCourses(selectedBatch, selectedDept).toArray(new String[0]);
+            for (int i = 0; i < courseCombos.length; i++) {
+                for (int j = 0; j < courseCombos[i].length; j++) {
+                    courseCombos[i][j].removeAllItems();
+                    for (String course : courses) {
+                        courseCombos[i][j].addItem(course);
+                    }
+                }
+            }
+        }
+    }
+
+    private void updateCourses(JComboBox<String> batchCombo, JComboBox<String> deptCombo, JComboBox<String>[][] courseCombos, JSON_FUNCTIONS json) {
+        String selectedBatch = (String) batchCombo.getSelectedItem();
+        String selectedDept = (String) deptCombo.getSelectedItem();
+
+        if (selectedBatch != null && selectedDept != null) {
+            String[] courses = json.getCourses(selectedBatch, selectedDept).toArray(new String[0]);
+
+            for (int i = 0; i < courseCombos.length; i++) {
+                for (int j = 0; j < courseCombos[i].length; j++) {
+                    courseCombos[i][j].removeAllItems();
+                    for (String course : courses) {
+                        courseCombos[i][j].addItem(course);
+                    }
+                }
+            }
+        }
+    }
+
+    private void showCreateTeacherTimetableDialog() {
+        JDialog dialog = new JDialog(this, "Create Teacher Timetable", true);
+        dialog.setSize(1000, 800);
+        dialog.setLocationRelativeTo(this);
+
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JSON_FUNCTIONS json = new JSON_FUNCTIONS("C:\\Users\\HP\\OneDrive\\Desktop\\baseclasstimetable.txt");
+
+        JPanel formPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        gbc.gridx = 0; gbc.gridy = 0;
+        formPanel.add(new JLabel("Teacher Name:"), gbc);
+        JTextField teacherNameField = new JTextField(20);
+        gbc.gridx = 1; gbc.gridy = 0;
+        formPanel.add(teacherNameField, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 2;
+        formPanel.add(new JLabel("Course Assignments:"), gbc);
+
+        JPanel assignmentsPanel = new JPanel();
+        assignmentsPanel.setLayout(new BoxLayout(assignmentsPanel, BoxLayout.Y_AXIS));
+        assignmentsPanel.setBorder(BorderFactory.createEtchedBorder());
+
+        JScrollPane assignmentsScrollPane = new JScrollPane(assignmentsPanel);
+        assignmentsScrollPane.setPreferredSize(new Dimension(800, 200));
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
+        formPanel.add(assignmentsScrollPane, gbc);
+
+        JButton addAssignmentButton = new JButton("Add Course Assignment");
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2;
+        formPanel.add(addAssignmentButton, gbc);
+
+        JTextArea timetableArea = new JTextArea(15, 60);
+        timetableArea.setEditable(false);
+        JScrollPane timetableScrollPane = new JScrollPane(timetableArea);
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.BOTH;
+        formPanel.add(timetableScrollPane, gbc);
+
+        JButton generateButton = new JButton("Generate Timetable");
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 1; gbc.fill = GridBagConstraints.NONE;
+        formPanel.add(generateButton, gbc);
+
+        JButton saveButton = new JButton("Save Timetable");
+        gbc.gridx = 1; gbc.gridy = 5;
+        formPanel.add(saveButton, gbc);
+
+        addAssignmentButton.addActionListener(e -> {
+            JPanel assignmentPanel = new JPanel(new GridBagLayout());
+            GridBagConstraints agbc = new GridBagConstraints();
+            agbc.insets = new Insets(2, 2, 2, 2);
+            agbc.anchor = GridBagConstraints.WEST;
+
+            agbc.gridx = 0; agbc.gridy = 0;
+            assignmentPanel.add(new JLabel("Batch:"), agbc);
+            JComboBox<String> batchCombo = new JComboBox<>();
+            batchCombo.setPreferredSize(new Dimension(200, 25));
+            for (String batch : json.getBatches()) batchCombo.addItem(batch);
+            agbc.gridx = 1; agbc.gridy = 0;
+            assignmentPanel.add(batchCombo, agbc);
+
+            agbc.gridx = 0; agbc.gridy = 1;
+            assignmentPanel.add(new JLabel("Department:"), agbc);
+            JComboBox<String> deptCombo = new JComboBox<>();
+            deptCombo.setPreferredSize(new Dimension(200, 25));
+            agbc.gridx = 1; agbc.gridy = 1;
+            assignmentPanel.add(deptCombo, agbc);
+
+            agbc.gridx = 0; agbc.gridy = 2;
+            assignmentPanel.add(new JLabel("Section:"), agbc);
+            JComboBox<String> sectionCombo = new JComboBox<>();
+            sectionCombo.setPreferredSize(new Dimension(200, 25));
+            agbc.gridx = 1; agbc.gridy = 2;
+            assignmentPanel.add(sectionCombo, agbc);
+
+            agbc.gridx = 0; agbc.gridy = 3;
+            assignmentPanel.add(new JLabel("Course:"), agbc);
+            JComboBox<String> courseCombo = new JComboBox<>();
+            courseCombo.setPreferredSize(new Dimension(200, 25));
+            agbc.gridx = 1; agbc.gridy = 3;
+            assignmentPanel.add(courseCombo, agbc);
+
+            JButton removeButton = new JButton("Remove");
+            agbc.gridx = 2; agbc.gridy = 0; agbc.gridheight = 4;
+            assignmentPanel.add(removeButton, agbc);
+
+            batchCombo.addActionListener(evt -> {
+                deptCombo.removeAllItems();
+                String batch = (String) batchCombo.getSelectedItem();
+                if (batch != null) {
+                    for (String dept : json.getDepartments(batch)) deptCombo.addItem(dept);
+                }
+            });
+
+            deptCombo.addActionListener(evt -> {
+                sectionCombo.removeAllItems();
+                courseCombo.removeAllItems();
+                String batch = (String) batchCombo.getSelectedItem();
+                String dept = (String) deptCombo.getSelectedItem();
+                if (batch != null && dept != null) {
+                    for (String section : json.getSections(batch, dept)) sectionCombo.addItem(section);
+                    for (String course : json.getCourses(batch, dept)) courseCombo.addItem(course);
+                }
+            });
+
+            if (batchCombo.getItemCount() > 0) batchCombo.setSelectedIndex(0);
+
+            removeButton.addActionListener(evt -> {
+                assignmentsPanel.remove(assignmentPanel);
+                assignmentsPanel.revalidate();
+                assignmentsPanel.repaint();
+            });
+
+            assignmentsPanel.add(assignmentPanel);
+            assignmentsPanel.revalidate();
+            assignmentsPanel.repaint();
+        });
+
+        generateButton.addActionListener(e -> {
+            String teacherName = teacherNameField.getText().trim();
+            if (teacherName.isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "Please enter teacher name", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            if (assignmentsPanel.getComponentCount() == 0) {
+                JOptionPane.showMessageDialog(dialog, "Please add at least one course assignment", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            Map<String, List<String>> timetableMap = new LinkedHashMap<>();
+            String[] days = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday"};
+            for (String day : days) timetableMap.put(day, new ArrayList<>());
+
+            StringBuilder timetableBuilder = new StringBuilder();
+            timetableBuilder.append("Timetable for ").append(teacherName).append("\n\n");
+
+            for (Component comp : assignmentsPanel.getComponents()) {
+                if (comp instanceof JPanel) {
+                    JPanel assignmentPanel = (JPanel) comp;
+                    String batch = "", dept = "", section = "", course = "";
+
+                    for (Component ac : assignmentPanel.getComponents()) {
+                        if (ac instanceof JComboBox<?>) {
+                            JComboBox<?> combo = (JComboBox<?>) ac;
+                            String value = (String) combo.getSelectedItem();
+                            if (value == null) continue;
+
+                            String label = ((JLabel) ((Container) assignmentPanel.getComponent(
+                                    assignmentPanel.getComponentZOrder(combo) - 1))).getText();
+
+                            switch (label) {
+                                case "Batch:" -> batch = value;
+                                case "Department:" -> dept = value;
+                                case "Section:" -> section = value;
+                                case "Course:" -> course = value;
+                            }
+                        }
+                    }
+
+                    if (batch.isEmpty() || dept.isEmpty() || section.isEmpty() || course.isEmpty()) {
+                        timetableBuilder.append("Incomplete assignment information.\n\n");
+                        continue;
+                    }
+
+                    timetableBuilder.append("Course: ").append(course)
+                            .append(" (").append(batch).append(" ").append(dept).append(" ").append(section).append(")\n");
+
+                    String filename = "src/timetable/" + batch + "_" + dept + "_" + section + ".txt";
+                    File file = new File(filename);
+
+                    if (!file.exists()) {
+                        timetableBuilder.append("  Timetable file not found for this class\n\n");
+                        continue;
+                    }
+
+                    try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                        String line;
+                        String currentDay = null;
+                        boolean courseFound = false;
+
+                        while ((line = reader.readLine()) != null) {
+                            line = line.trim();
+                            if (line.isEmpty()) continue;
+                            if (line.contains(":")) {
+                                String[] daySplit = line.split(":", 2);
+                                if (daySplit.length < 2) continue;
+
+                                String day = daySplit[0].trim();
+                                String slots = daySplit[1].trim();
+
+                                String[] entries = slots.split(",");
+                                for (String entry : entries) {
+                                    entry = entry.trim();
+                                    if (entry.startsWith(course + " ") || entry.contains(course + " (") || entry.equals(course)) {
+                                        timetableMap.get(day).add(entry);
+                                        timetableBuilder.append("  ").append(day).append(": ").append(entry).append("\n");
+                                        courseFound = true;
+                                    }
+                                }
+                            }
+
+                        }
+
+                        if (!courseFound) {
+                            timetableBuilder.append("  Course not found in class timetable\n");
+                        }
+
+                        timetableBuilder.append("\n");
+                    } catch (IOException ex) {
+                        timetableBuilder.append("  Error reading timetable file: ").append(ex.getMessage()).append("\n\n");
+                    }
+                }
+            }
+
+            timetableBuilder.append("\nConsolidated Timetable:\n");
+            for (Map.Entry<String, List<String>> entry : timetableMap.entrySet()) {
+                if (!entry.getValue().isEmpty()) {
+                    timetableBuilder.append(entry.getKey()).append(":\n");
+                    for (String slot : entry.getValue()) {
+                        timetableBuilder.append("  ").append(slot).append("\n");
+                    }
+                }
+            }
+
+            timetableArea.setText(timetableBuilder.toString());
+        });
+
+        saveButton.addActionListener(e -> {
+            String teacherName = teacherNameField.getText().trim();
+            if (teacherName.isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "Please enter teacher name", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            if (timetableArea.getText().isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "No timetable to save", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            try {
+                File dir = new File("src/timetable");
+                if (!dir.exists()) dir.mkdirs();
+
+                String filename = "src/timetable/" + teacherName.replace(" ", "_") + "_timetable.txt";
+                try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
+                    writer.println(timetableArea.getText());
+                }
+
+                JOptionPane.showMessageDialog(dialog, "Timetable saved successfully as " + filename,
+                        "Success", JOptionPane.INFORMATION_MESSAGE);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(dialog, "Error saving timetable: " + ex.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        panel.add(formPanel, BorderLayout.CENTER);
+        dialog.add(panel);
+        dialog.setVisible(true);
+    }
+
+
+    private String getSelectedValueFromPanel(JPanel panel, String componentName) {
+
+            for (Component comp : panel.getComponents()) {
+                if (comp instanceof JComboBox) {
+                    JComboBox<String> comboBox = (JComboBox<String>) comp;
+                    String name = (String) comboBox.getSelectedItem();
+                    if (componentName.equals("batch") && name != null) {
+                        return name;  // Return batch value
+                    } else if (componentName.equals("dept") && name != null) {
+                        return name;  // Return department value
+                    } else if (componentName.equals("section") && name != null) {
+                        return name;  // Return section value
+                    } else if (componentName.equals("course") && name != null) {
+                        return name;  // Return course value
+                    }
+                } else if (comp instanceof JTextField) {
+                    JTextField textField = (JTextField) comp;
+                    String text = textField.getText().trim();
+                    if (componentName.equals("course") && !text.isEmpty()) {
+                        return text;  // Return course value from text field
+                    }
+                }
+            }
+            return null;  // Return null if no value is found
+        }
+
+
+    private void updateSectionsCheckboxes(JComboBox<String> batchCombo, JComboBox<String> deptCombo,
+                                          JComboBox<String> courseCombo, JPanel sectionsPanel,
+                                          JSON_FUNCTIONS json) {
+        sectionsPanel.removeAll();
+
+        String batch = (String) batchCombo.getSelectedItem();
+        String dept = (String) deptCombo.getSelectedItem();
+        String course = (String) courseCombo.getSelectedItem();
+
+        if (batch == null || dept == null || course == null) {
+            return;
+        }
+
+        // Get sections that have this course in their timetable
+        List<String> sections = json.getSections(batch, dept);
+        for (String section : sections) {
+            JCheckBox checkBox = new JCheckBox(section);
+            sectionsPanel.add(checkBox);
+        }
+
+        sectionsPanel.revalidate();
+        sectionsPanel.repaint();
+    }
+
+    private void showViewStudentTimetableDialog() {
+        String section = JOptionPane.showInputDialog(this, "Enter section to view:");
+        if (section != null && !section.isEmpty()) {
+            Student student = new Student("", "", section, "");
+            JDialog dialog = new JDialog(this, "Student Timetable - " + section, false);
+            dialog.setSize(600, 500);
+            dialog.setLocationRelativeTo(this);
+
+            JTextArea textArea = new JTextArea();
+            textArea.setEditable(false);
+            JScrollPane scrollPane = new JScrollPane(textArea);
+            dialog.add(scrollPane);
+
+            student.displayTimetable(textArea);
+            dialog.setVisible(true);
+        }
+    }
+
+    private void showViewTeacherTimetableDialog() {
+        String name = JOptionPane.showInputDialog(this, "Enter teacher name to view:");
+        if (name != null && !name.isEmpty()) {
+            // Define the base directory and file path
+            String baseDir = "C:\\Users\\HP\\IdeaProjects\\fast timetable\\src\\timetable\\";
+            // Replace spaces with underscores in filename
+            String fileName = name.toLowerCase().replace(" ", "_") + "_timetable.txt";
+            String filePath = baseDir + fileName;
+
+            JDialog dialog = new JDialog(this, "Teacher Timetable - " + name, false);
+            dialog.setSize(600, 500);
+            dialog.setLocationRelativeTo(this);
+
+            JTextArea textArea = new JTextArea();
+            textArea.setEditable(false);
+            JScrollPane scrollPane = new JScrollPane(textArea);
+            dialog.add(scrollPane);
+
+            try {
+                // Read the entire file
+                File file = new File(filePath);
+                if (file.exists()) {
+                    StringBuilder content = new StringBuilder();
+                    content.append("TIMETABLE FOR ").append(name.toUpperCase()).append("\n\n");
+
+                    BufferedReader reader = new BufferedReader(new FileReader(file));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        content.append(line).append("\n");
+                    }
+                    reader.close();
+
+                    textArea.setText(content.toString());
+                } else {
+                    textArea.setText("No timetable found for teacher: " + name +
+                            "\nExpected file: " + fileName);
+                }
+            } catch (IOException e) {
+                textArea.setText("Error reading timetable file: " + e.getMessage());
+            }
+
+            dialog.setVisible(true);
+        }
+    }
+
+    private Map<Day, List<String>> parseTimetableData(String text) {
+        Map<Day, List<String>> timetableData = new EnumMap<>(Day.class);
+        Day currentDay = Day.MONDAY;
+
+        String[] lines = text.split("\n");
+        for (String line : lines) {
+            if (line.trim().isEmpty()) continue;
+
+            if (line.endsWith(":")) {
+                currentDay = Day.fromString(line.substring(0, line.length() - 1));
+            } else {
+                timetableData.computeIfAbsent(currentDay, k -> new ArrayList<>()).add(line.trim());
+            }
+        }
+
+        return timetableData;
+    }
+}
+
